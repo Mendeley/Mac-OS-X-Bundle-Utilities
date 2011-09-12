@@ -1,0 +1,10 @@
+update-mac-bundle-lib-names.rb is a script to replace
+references to libraries in binaries in a Mac OS X bundle to refer
+to copies of the libraries in the bundle instead of system-wide locations.
+
+It was originally written for use with a Qt application to ensure that the application
+in the bundle used the copies of the Qt libraries instead of copies installed to
+system-wide locations.
+
+See update-mac-bundle-lib-names.rb for more details and usage.
+
