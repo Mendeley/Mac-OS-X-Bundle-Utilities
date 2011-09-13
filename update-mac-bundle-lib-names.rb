@@ -106,7 +106,6 @@ end.parse!
 bundle_dir = ARGV[0]
 binaries = find_binaries(bundle_dir)
 install_name_map = {}
-binary_paths = {}
 
 # first pass - update the install names of each shared library
 # in the bundle to be relative to the Contents/MacOS directory
