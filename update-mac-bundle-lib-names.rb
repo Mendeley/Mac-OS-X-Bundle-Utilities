@@ -20,27 +20,13 @@
 require 'optparse'
 require 'pathname'
 
+require File.dirname(__FILE__) + "/common.rb"
+
+BUNDLE_MAIN_EXE_PATH = "Contents/MacOS"
+
 def is_system_lib(lib_path)
 	return lib_path =~ /^\/System/ ||
 	       lib_path =~ /^\/usr\/lib/
-end
-
-# Return an array listing the dependencies of 'lib_path'
-# (as returned by 'otool -L $LIB_PATH')
-def get_dependencies(lib_path)
-	deps = []
-	entry_name_regex = /(.*)\(compatibility version.*\)/
-	`otool -L '#{lib_path}'`.strip.split("\n").each do |entry|
-		match = entry_name_regex.match(entry)
-		if (match)
-			dep_path = match[1].strip
-
-			# Note - otool lists dependencies separately for each architecture
-			# in a universal binary - only return the unique paths
-			deps << dep_path if !deps.include?(dep_path)
-		end
-	end
-	return deps
 end
 
 def install_name_needs_fixup?(lib)
@@ -50,10 +36,19 @@ end
 # returns the path of 'binary' relative to the executable path
 # within the binary
 def get_bundle_install_name(bundle_dir, binary)
-	current_dir = "#{bundle_dir}/Contents/MacOS"
+	current_dir = "#{bundle_dir}/#{BUNDLE_MAIN_EXE_PATH}"
 	relative_path = Pathname.new(binary).relative_path_from(Pathname.new(current_dir)).to_s
 	relative_path = "@executable_path/#{relative_path}"
 	return relative_path
+end
+
+# returns the path to the root of the bundle containing 'binary'
+def containing_bundle_path(binary)
+	dir = File.dirname(binary)
+	while !dir.end_with?('.app') && dir != '/'
+		dir = File.dirname(dir)
+	end
+	return dir
 end
 
 def find_binaries(bundle_path)
@@ -105,7 +100,11 @@ end.parse!
 # find all binaries in the bundle
 bundle_dir = ARGV[0]
 binaries = find_binaries(bundle_dir)
-install_name_map = {}
+binary_paths = {}
+
+# |install_name_path_map| maps from current install name of a binary
+# to the path to that binary within the bundle.
+install_name_path_map = {}
 
 # first pass - update the install names of each shared library
 # in the bundle to be relative to the Contents/MacOS directory
@@ -115,7 +114,7 @@ binaries.each do |binary|
 	    install_name_needs_fixup?(current_install_name))
 		new_install_name = get_bundle_install_name(bundle_dir,binary)
 		run_cmd(dry_run,verbose,"install_name_tool -id \"#{new_install_name}\" \"#{binary}\"")
-		install_name_map[current_install_name] = new_install_name
+		install_name_path_map[current_install_name] = binary
 	end
 end
 
@@ -129,10 +128,20 @@ binaries.each do |binary|
 		next if is_system_lib(dep)
 
 		if (install_name_needs_fixup?(dep))
-			if (!install_name_map.include?(dep))
+			if (!install_name_path_map.include?(dep))
 				raise "Library '#{dep}' referenced by '#{binary}' not found in bundle."
 			end
-			install_name = install_name_map[dep]
+
+			# get the relative path from the directory containing the binary
+			# to the dependency.
+			dep_bundle_path = install_name_path_map[dep]
+			binary_path = File.dirname(binary)
+			rel_path = Pathname.new(dep_bundle_path).relative_path_from(Pathname.new(binary_path)).to_s
+
+			# @loader_path is replaced at runtime with the path to the binary
+			# see http://www.mikeash.com/pyblog/friday-qa-2009-11-06-linking-and-install-names.html
+			# for an explanation.
+			install_name = "@loader_path/#{rel_path}"
 			run_cmd(dry_run,verbose,"install_name_tool -change \"#{dep}\" \"#{install_name}\" \"#{binary}\"")
 		end
 	end
